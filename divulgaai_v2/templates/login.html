@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Entrar • Promo Builder</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="login-card">
+      <div class="badge">v5.2</div>
+      <h1>Entrar no painel</h1>
+      <p class="subtitle">Agora com rascunhos, histórico de aprovação, busca, dashboard e editor de imagem simples.</p>
+      <form method="post" class="login-form">
+        <label>Usuário<input name="username" required /></label>
+        <label>Senha<input name="password" type="password" required /></label>
+        {% if error %}<div class="status error">{{ error }}</div>{% endif %}
+        <button class="primary" type="submit">Entrar</button>
+      </form>
+      <div class="muted-small">Login inicial: admin / 1234</div>
+    </section>
+  </main>
+</body>
+</html>
