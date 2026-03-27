@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: promo-builder-v52
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python app.py
-    autoDeploy: true
