@@ -3,16 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Promo Builder Telegram v5.2</title>
+  <title>Promo Builder Telegram v5.3</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
 <body>
   <div class="container">
     <header class="hero hero-flex">
       <div>
-        <div class="badge">v5.2</div>
+        <div class="badge">v5.3</div>
         <h1>Painel da equipe de promoções</h1>
-        <p class="subtitle">Rascunhos, busca no histórico, edição de agendados, aprovação com histórico, notificações internas e comissão para admin.</p>
+        <p class="subtitle">Rascunhos, busca no histórico, edição de agendados, aprovação com histórico, moderação de palavras e comissão só para admin.</p>
       </div>
       <div class="top-actions">
         <div class="mini-user">{{ user_name }} • {{ user_role }}</div>
@@ -20,6 +20,7 @@
       </div>
     </header>
 
+    {% if user_role in ['admin','subadmin'] %}
     <section class="stats-grid">
       <div class="stat-card"><div class="stat-num" id="s_users">{{ dashboard_numbers.total_users }}</div><div class="stat-label">Usuários ativos</div></div>
       <div class="stat-card"><div class="stat-num" id="s_sent">{{ dashboard_numbers.total_sent }}</div><div class="stat-label">Posts enviados</div></div>
@@ -28,6 +29,7 @@
       <div class="stat-card"><div class="stat-num" id="s_sched">{{ dashboard_numbers.total_scheduled }}</div><div class="stat-label">Agendados</div></div>
       <div class="stat-card"><div class="stat-num" id="s_rej">{{ dashboard_numbers.total_rejected }}</div><div class="stat-label">Recusados</div></div>
     </section>
+    {% endif %}
 
     <div class="grid-v5">
       <section class="panel main-panel">
@@ -57,7 +59,7 @@
             <h3>Editor de imagem simples</h3>
             <label>Escala da imagem<input id="img_scale" type="range" min="50" max="150" value="100" oninput="applyImageEdits()" /></label>
             <label>Arredondamento<input id="img_radius" type="range" min="0" max="40" value="20" oninput="applyImageEdits()" /></label>
-            <label>Texto sobre a imagem<input id="img_badge" placeholder="OFERTA" oninput="applyImageEdits()" /></label>
+            <div class="muted-small">O texto sobre a imagem foi removido para evitar sobreposição no criativo.</div>
           </div>
           <div class="panel inner-panel">
             <h3>Extras</h3>
@@ -85,8 +87,7 @@
         <div class="promo-card">
           <div class="image-wrap square-wrap">
             <img id="previewImage" alt="Imagem do produto" />
-            <div class="image-overlay-badge" id="previewBadge"></div>
-          </div>
+                      </div>
           <div class="promo-body">
             <pre id="previewCopy" class="preview-copy">Sua prévia vai aparecer aqui.</pre>
           </div>
@@ -154,7 +155,7 @@
                   {% if user_role == 'admin' %}<option value="admin" {% if user.role=='admin' %}selected{% endif %}>Administrador</option>{% endif %}
                 </select>
               </label>
-              <label>Nova senha<input id="pass_{{ user.id }}" placeholder="deixe em branco para manter" /></label>
+              <label>Nova senha<input id="pass_{{ user.id }}" placeholder="{{ 'bloqueado para subadmin' if user_role == 'subadmin' and user.role in ['admin','subadmin'] else 'deixe em branco para manter' }}" {% if user_role == 'subadmin' and user.role in ['admin','subadmin'] %}disabled{% endif %} /></label>
               <label>Ativo
                 <select id="active_{{ user.id }}"><option value="1" {% if user.is_active %}selected{% endif %}>Sim</option><option value="0" {% if not user.is_active %}selected{% endif %}>Não</option></select>
               </label>
@@ -175,6 +176,8 @@
             <div><strong>#{{ post.id }}</strong> • {{ post.status }}</div>
             <div class="muted-small">por {{ post.created_by }} • {{ post.created_at }}</div>
             {% if post.scheduled_for %}<div class="muted-small">agendado para {{ post.scheduled_for }}</div>{% endif %}
+            {% if post.image %}<img class="queue-thumb" src="{{ post.image }}" alt="Imagem do post {{ post.id }}" />{% endif %}
+            {% if post.title %}<div class="muted-small">{{ post.title }}{% if post.store %} • {{ post.store }}{% endif %}{% if post.price %} • {{ post.price }}{% endif %}</div>{% endif %}
             {% if post.commission_estimate and user_role == 'admin' %}<div class="muted-small">Comissão: {{ post.commission_estimate }}</div>{% endif %}
             <pre class="mini-pre">{{ post.caption }}</pre>
             <div class="row row-wrap">
@@ -219,6 +222,7 @@
 <script>
 let currentProduct = {};
 let currentDraftId = null;
+const USER_ROLE = {{ user_role|tojson }};
 
 function setStatus(msg, ok=false, target='status'){ const el=document.getElementById(target); if(!el) return; el.textContent=msg||''; el.classList.toggle('error', !ok && !!msg); }
 function getVal(id){ const el=document.getElementById(id); return el ? el.value.trim() : ''; }
@@ -314,11 +318,8 @@ function applyImageEdits(){
   if(!img) return;
   const scale = document.getElementById('img_scale') ? document.getElementById('img_scale').value : 100;
   const radius = document.getElementById('img_radius') ? document.getElementById('img_radius').value : 20;
-  const badge = document.getElementById('img_badge') ? document.getElementById('img_badge').value.trim() : '';
   img.style.transform = `scale(${scale/100})`;
   img.style.borderRadius = `${radius}px`;
-  document.getElementById('previewBadge').textContent = badge;
-  document.getElementById('previewBadge').style.display = badge ? 'block' : 'none';
 }
 
 async function uploadImage(){
@@ -440,18 +441,29 @@ async function markNotificationRead(id){ await fetch(`/api/notifications/${id}/r
 
 function renderList(id, html){ const wrap = document.getElementById(id); if(wrap) wrap.innerHTML = html; }
 
+function esc(text){ return String(text || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m])); }
+function canShowDashboard(){ return ['admin','subadmin'].includes(USER_ROLE); }
+function roleOptions(currentRole){
+  const roles = USER_ROLE === 'admin' ? ['member','editor','subadmin','admin'] : ['member','editor','subadmin'];
+  return roles.map(role => `<option value="${role}" ${currentRole===role?'selected':''}>${role}</option>`).join('');
+}
+function passwordField(user){
+  const blocked = USER_ROLE === 'subadmin' && ['admin','subadmin'].includes(user.role);
+  return `<label>Nova senha<input id="pass_${user.id}" placeholder="${blocked ? 'bloqueado para subadmin' : 'deixe em branco para manter'}" ${blocked ? 'disabled' : ''} /></label>`;
+}
+
 function renderUsers(users){
   const html = users.length ? users.map(user => `
     <div class="mini-item">
-      <div class="user-actions-head"><div><strong>${user.display_name}</strong> <span class="muted-small">@${user.username}</span></div><div class="tag">${user.role}</div></div>
+      <div class="user-actions-head"><div><strong>${esc(user.display_name)}</strong> <span class="muted-small">@${esc(user.username)}</span></div><div class="tag">${esc(user.role)}</div></div>
       <div class="form-grid compact">
-        <label>Nome<input id="display_${user.id}" value="${user.display_name}" /></label>
+        <label>Nome<input id="display_${user.id}" value="${esc(user.display_name)}" /></label>
         <label>Perfil
           <select id="role_${user.id}">
-            ${['member','editor','subadmin','admin'].map(role => `<option value="${role}" ${user.role===role?'selected':''}>${role}</option>`).join('')}
+            ${roleOptions(user.role)}
           </select>
         </label>
-        <label>Nova senha<input id="pass_${user.id}" placeholder="deixe em branco para manter" /></label>
+        ${passwordField(user)}
         <label>Ativo<select id="active_${user.id}"><option value="1" ${user.is_active ? 'selected':''}>Sim</option><option value="0" ${!user.is_active ? 'selected':''}>Não</option></select></label>
       </div>
       <div class="row row-wrap"><button class="ghost fit" onclick="updateUser(${user.id})">Salvar edição</button><button class="danger fit" onclick="deleteUser(${user.id})">Excluir</button></div>
@@ -462,11 +474,13 @@ function renderUsers(users){
 function renderPending(posts){
   const html = posts.length ? posts.map(post => `
     <div class="mini-item">
-      <div><strong>#${post.id}</strong> • ${post.status}</div>
-      <div class="muted-small">por ${post.created_by} • ${post.created_at}</div>
-      ${post.scheduled_for ? `<div class="muted-small">agendado para ${post.scheduled_for}</div>` : ''}
-      ${post.commission_estimate ? `<div class="muted-small">Comissão: ${post.commission_estimate}</div>` : ''}
-      <pre class="mini-pre">${(post.caption || '').replace(/</g,'&lt;')}</pre>
+      <div><strong>#${post.id}</strong> • ${esc(post.status)}</div>
+      <div class="muted-small">por ${esc(post.created_by)} • ${esc(post.created_at)}</div>
+      ${post.scheduled_for ? `<div class="muted-small">agendado para ${esc(post.scheduled_for)}</div>` : ''}
+      ${post.image ? `<img class="queue-thumb" src="${esc(post.image)}" alt="Imagem do post ${post.id}">` : ''}
+      ${(post.title || post.store || post.price) ? `<div class="muted-small">${esc(post.title || 'Sem título')}${post.store ? ` • ${esc(post.store)}` : ''}${post.price ? ` • ${esc(post.price)}` : ''}</div>` : ''}
+      ${USER_ROLE === 'admin' && post.commission_estimate ? `<div class="muted-small">Comissão: ${esc(post.commission_estimate)}</div>` : ''}
+      <pre class="mini-pre">${esc(post.caption)}</pre>
       <div class="row row-wrap">
         ${post.status === 'pending_review' ? `<button class="primary fit" onclick="approvePost(${post.id})">Aprovar</button><button class="danger fit" onclick="rejectPost(${post.id})">Recusar</button>` : ''}
         ${post.status === 'approved_scheduled' ? `<button class="ghost fit" onclick="prepareScheduledEdit(${post.id})">Editar agendado</button>` : ''}
@@ -496,8 +510,9 @@ function renderNotifications(items){
 }
 
 function renderStats(stats){
+  if(!canShowDashboard()) return;
   const map = {s_users:stats.total_users, s_sent:stats.total_sent, s_pending:stats.total_pending, s_drafts:stats.total_drafts, s_sched:stats.total_scheduled, s_rej:stats.total_rejected};
-  Object.entries(map).forEach(([id,v]) => { const el=document.getElementById(id); if(el) el.textContent=v; });
+  Object.entries(map).forEach(([id,v]) => { const el=document.getElementById(id); if(el) el.textContent=v ?? 0; });
 }
 
 async function refreshDashboardData(){
