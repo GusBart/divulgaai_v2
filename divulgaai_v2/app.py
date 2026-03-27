@@ -29,46 +29,6 @@ DEFAULT_HEADERS = {
 }
 PRICE_PATTERNS = [r'R\$\s?\d{1,3}(?:\.\d{3})*,\d{2}', r'\d{1,3}(?:\.\d{3})*,\d{2}']
 
-BLOCKED_TERMS = [
-    'aposta', 'apostas', 'bet', 'bets', 'cassino', 'cassino online', 'jogo do tigrinho', 'fortune tiger',
-    'roleta', 'slot', 'slots', 'blaze', 'betano', 'sportingbet', 'pixbet', 'bet365',
-    'porno', 'pornô', 'porn', 'xvideos', 'xnxx', 'onlyfans', 'privacy', 'acompanhante', 'escort',
-    'nude', 'nudes', 'sexo', 'sexual', 'adulto', 'conteudo adulto', 'conteúdo adulto',
-    'caralho', 'porra', 'puta', 'viado', 'buceta', 'pau no cu', 'filho da puta', 'cu', 'foder', 'fodase', 'foda-se'
-]
-
-def normalize_for_match(text):
-    if not text: return ''
-    text = str(text).lower()
-    repl = str.maketrans({
-        'á':'a','à':'a','â':'a','ã':'a','ä':'a',
-        'é':'e','è':'e','ê':'e','ë':'e',
-        'í':'i','ì':'i','î':'i','ï':'i',
-        'ó':'o','ò':'o','ô':'o','õ':'o','ö':'o',
-        'ú':'u','ù':'u','û':'u','ü':'u','ç':'c'
-    })
-    text = text.translate(repl)
-    return re.sub(r'\s+', ' ', text).strip()
-
-def find_blocked_term(*parts):
-    haystack = normalize_for_match(' '.join([clean_text(p) for p in parts if p]))
-    if not haystack: return ''
-    for term in BLOCKED_TERMS:
-        t = normalize_for_match(term)
-        if t and t in haystack:
-            return term
-    return ''
-
-def validate_product_content(product, caption='', image=''):
-    term = find_blocked_term(
-        product.get('url',''), product.get('title',''), product.get('store',''), product.get('coupon',''),
-        product.get('disclaimer',''), product.get('headline',''), product.get('internal_comment',''),
-        caption, image
-    )
-    if term:
-        return f"Conteúdo bloqueado por palavra-chave proibida: {term}"
-    return ''
-
 def now_str():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -132,6 +92,14 @@ def is_admin(): return current_role() == "admin"
 def clean_text(text):
     if not text: return ""
     return re.sub(r"\s+"," ",str(text)).strip()
+
+def clean_multiline_text(text):
+    if not text: return ""
+    text = str(text).replace('\r\n', '\n').replace('\r', '\n')
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.split('\n')]
+    cleaned = '\n'.join(lines)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
 
 def normalize_price(price):
     if not price: return ""
@@ -290,21 +258,11 @@ def team_users():
 
 def pending_posts():
     conn = db()
-    rows = conn.execute("""SELECT * FROM post_queue
-                           WHERE status IN ('pending_review','approved_scheduled','draft','rejected','error')
+    rows = conn.execute("""SELECT id,caption,created_by,status,review_note,scheduled_for,created_at,commission_estimate
+                           FROM post_queue WHERE status IN ('pending_review','approved_scheduled','draft','rejected','error')
                            ORDER BY id DESC LIMIT 50""").fetchall()
-    out = []
-    for r in rows:
-        try: payload = json.loads(r["payload_json"]) if r["payload_json"] else {}
-        except: payload = {}
-        out.append({
-            "id": r["id"], "caption": r["caption"], "created_by": r["created_by"], "status": r["status"],
-            "review_note": r["review_note"], "scheduled_for": r["scheduled_for"], "created_at": r["created_at"],
-            "commission_estimate": r["commission_estimate"], "image": r["image"] or payload.get("image", ""),
-            "title": payload.get("title", ""), "store": payload.get("store", ""), "price": payload.get("price", "")
-        })
     conn.close()
-    return out
+    return [dict(r) for r in rows]
 
 def drafts():
     conn = db()
@@ -386,7 +344,7 @@ def index():
         recent_posts=recent_posts(), team_users=team_users() if can_manage_users() else [],
         pending_posts=pending_posts() if can_review() else [], drafts=drafts(),
         approval_history=approval_history() if can_review() else [],
-        dashboard_numbers=dashboard_numbers() if can_review() else {}, notifications=notifications_for_role(current_role())
+        dashboard_numbers=dashboard_numbers(), notifications=notifications_for_role(current_role())
     )
 
 @app.route("/api/extract", methods=["POST"])
@@ -444,14 +402,11 @@ def api_upload_image():
 def api_save_draft():
     data = request.get_json(force=True) or {}
     product = enrich(data.get("product") or {}, preserve=True)
-    caption = clean_text(data.get("caption") or "")
+    caption = clean_multiline_text(data.get("caption") or "")
     image = clean_text(data.get("image") or product.get("image") or "")
     draft_id = data.get("draft_id")
     schedule_at = clean_text(data.get("schedule_at") or "")
     commission = clean_text(data.get("commission_estimate") or "") if is_admin() else ""
-    error = validate_product_content(product, caption, image)
-    if error:
-        return jsonify({"ok": False, "error": error}), 400
     conn = db()
     if draft_id:
         conn.execute("""UPDATE post_queue SET payload_json=?,caption=?,image=?,scheduled_for=?,commission_estimate=?,updated_at=?
@@ -481,16 +436,13 @@ def api_load_draft(draft_id):
 @login_required
 def api_send():
     data = request.get_json(force=True) or {}
-    caption = clean_text(data.get("caption") or "")
+    caption = clean_multiline_text(data.get("caption") or "")
     image = clean_text(data.get("image") or "")
     product = enrich(data.get("product") or {}, preserve=True)
     schedule_at = clean_text(data.get("schedule_at") or "")
     commission = clean_text(data.get("commission_estimate") or "") if is_admin() else ""
     internal_comment = clean_text(data.get("internal_comment") or "")
     if not caption: return jsonify({"ok": False, "error": "Texto vazio."}), 400
-    product["internal_comment"] = internal_comment
-    error = validate_product_content(product, caption, image)
-    if error: return jsonify({"ok": False, "error": error}), 400
     conn = db()
     role = current_role()
     if schedule_at:
@@ -537,14 +489,11 @@ def api_edit_scheduled(post_id):
     if not row:
         conn.close(); return jsonify({"ok": False, "error": "Post agendado não encontrado."}), 404
     payload = data.get("product") or json.loads(row["payload_json"])
-    caption = clean_text(data.get("caption") or row["caption"])
+    caption = clean_multiline_text(data.get("caption") or row["caption"])
     image = clean_text(data.get("image") or row["image"] or "")
     scheduled_for = clean_text(data.get("scheduled_for") or row["scheduled_for"] or "")
     note = clean_text(data.get("note") or "")
     commission = clean_text(data.get("commission_estimate") or row["commission_estimate"] or "")
-    error = validate_product_content(payload, caption, image)
-    if error:
-        conn.close(); return jsonify({"ok": False, "error": error}), 400
     conn.execute("""UPDATE post_queue SET payload_json=?,caption=?,image=?,scheduled_for=?,review_note=?,commission_estimate=?,updated_at=? WHERE id=?""",
                  (json.dumps(payload, ensure_ascii=False), caption, image, scheduled_for, note, commission if is_admin() else row["commission_estimate"], now_str(), post_id))
     conn.commit(); conn.close()
@@ -636,11 +585,9 @@ def api_update_user(user_id):
     if new_role not in ("admin","subadmin","editor","member"): new_role = target["role"]
     if current_role() == "subadmin" and (target["role"] == "admin" or new_role == "admin"):
         conn.close(); return jsonify({"ok": False, "error": "Subadmin não pode alterar administrador."}), 403
-    password = data.get("password") or ""
-    if current_role() == "subadmin" and password and target["role"] in ("admin", "subadmin"):
-        conn.close(); return jsonify({"ok": False, "error": "Subadmin não pode editar a senha de administrador ou subadmin."}), 403
     display_name = clean_text(data.get("display_name") or target["display_name"])
     is_active = 1 if str(data.get("is_active",1)) in ("1","true","True") else 0
+    password = data.get("password") or ""
     if password:
         conn.execute("UPDATE users SET display_name=?, role=?, is_active=?, password_hash=? WHERE id=?",
                      (display_name, new_role, is_active, generate_password_hash(password), user_id))
@@ -686,7 +633,7 @@ def api_dashboard():
         "pending_posts": pending_posts() if can_review() else [],
         "drafts": drafts(),
         "approval_history": approval_history() if can_review() else [],
-        "dashboard_numbers": dashboard_numbers() if can_review() else {},
+        "dashboard_numbers": dashboard_numbers(),
         "notifications": notifications_for_role(current_role())
     })
 

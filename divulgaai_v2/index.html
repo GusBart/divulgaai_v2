@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Promo Builder Telegram v5.2</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <div class="container">
+    <header class="hero hero-flex">
+      <div>
+        <div class="badge">v5.2</div>
+        <h1>Painel da equipe de promoções</h1>
+        <p class="subtitle">Rascunhos, busca no histórico, edição de agendados, aprovação com histórico, notificações internas e comissão para admin.</p>
+      </div>
+      <div class="top-actions">
+        <div class="mini-user">{{ user_name }} • {{ user_role }}</div>
+        <a class="logout-link" href="{{ url_for('logout') }}">Sair</a>
+      </div>
+    </header>
+
+    <section class="stats-grid">
+      <div class="stat-card"><div class="stat-num" id="s_users">{{ dashboard_numbers.total_users }}</div><div class="stat-label">Usuários ativos</div></div>
+      <div class="stat-card"><div class="stat-num" id="s_sent">{{ dashboard_numbers.total_sent }}</div><div class="stat-label">Posts enviados</div></div>
+      <div class="stat-card"><div class="stat-num" id="s_pending">{{ dashboard_numbers.total_pending }}</div><div class="stat-label">Aguardando revisão</div></div>
+      <div class="stat-card"><div class="stat-num" id="s_drafts">{{ dashboard_numbers.total_drafts }}</div><div class="stat-label">Rascunhos</div></div>
+      <div class="stat-card"><div class="stat-num" id="s_sched">{{ dashboard_numbers.total_scheduled }}</div><div class="stat-label">Agendados</div></div>
+      <div class="stat-card"><div class="stat-num" id="s_rej">{{ dashboard_numbers.total_rejected }}</div><div class="stat-label">Recusados</div></div>
+    </section>
+
+    <div class="grid-v5">
+      <section class="panel main-panel">
+        <h2>Montar promoção</h2>
+        <div class="row row-wrap">
+          <input id="url" placeholder="Cole o link do produto" />
+          <button class="primary fit" onclick="extractData()">Puxar dados</button>
+          <button class="ghost fit" onclick="buildCopy()">Montar texto</button>
+          <button class="ghost fit" onclick="saveHistory()">Salvar histórico</button>
+          <button class="ghost fit" onclick="saveDraft()">Salvar rascunho</button>
+        </div>
+
+        <div class="form-grid">
+          <label>Título<input id="title" placeholder="Nome do produto" /></label>
+          <label>Loja<input id="store" placeholder="Ex: Mercado Livre" /></label>
+          <label>Preço atual<input id="price" placeholder="R$ 199,90" /></label>
+          <label>Preço antigo<input id="old_price" placeholder="R$ 249,90" /></label>
+          <label>Cupom<input id="coupon" placeholder="Cupom se tiver" /></label>
+          <label>Imagem por link<input id="image" placeholder="https://...jpg" oninput="previewCard()" /></label>
+          <label>Upload de imagem<input id="image_upload" type="file" accept="image/*" onchange="uploadImage()" /></label>
+          <label>Classificação de fogo<input id="fire_label" placeholder="Melhor preço até agora" /></label>
+          <label>Headline editável<input id="headline" placeholder="🔥🔥🔥 MELHOR PREÇO NESSE MERCADO LIVRE" /></label>
+        </div>
+
+        <div class="editor-grid">
+          <div class="panel inner-panel">
+            <h3>Editor de imagem simples</h3>
+            <label>Escala da imagem<input id="img_scale" type="range" min="50" max="150" value="100" oninput="applyImageEdits()" /></label>
+            <label>Arredondamento<input id="img_radius" type="range" min="0" max="40" value="20" oninput="applyImageEdits()" /></label>
+            <label>Texto sobre a imagem<input id="img_badge" placeholder="OFERTA" oninput="applyImageEdits()" /></label>
+          </div>
+          <div class="panel inner-panel">
+            <h3>Extras</h3>
+            <label>Agendar para<input id="schedule_at" type="datetime-local" /></label>
+            <label>Observação final<input id="disclaimer" placeholder="Opcional" /></label>
+            <label>Comentário interno<input id="internal_comment" placeholder="Só equipe vê isso" /></label>
+            {% if user_role == 'admin' %}
+            <label>Comissão estimada<input id="commission_estimate" placeholder="Ex: R$ 12,40" /></label>
+            {% endif %}
+          </div>
+        </div>
+
+        <label>Texto pronto para o Telegram<textarea id="copy"></textarea></label>
+        <div class="row row-wrap actions-v5">
+          <button class="primary fit" onclick="previewCard()">Atualizar prévia</button>
+          <button class="ghost fit" onclick="copyText()">Copiar texto</button>
+          <button class="primary fit" onclick="sendTelegram()">{{ 'Enviar para aprovação' if user_role == 'member' else 'Enviar / Agendar' }}</button>
+        </div>
+        <div id="status" class="status"></div>
+      </section>
+
+      <aside class="panel preview-panel">
+        <h2>Prévia do post</h2>
+        <div class="fire-badge" id="fireBadge">🔥 Preço ok</div>
+        <div class="promo-card">
+          <div class="image-wrap square-wrap">
+            <img id="previewImage" alt="Imagem do produto" />
+            <div class="image-overlay-badge" id="previewBadge"></div>
+          </div>
+          <div class="promo-body">
+            <pre id="previewCopy" class="preview-copy">Sua prévia vai aparecer aqui.</pre>
+          </div>
+        </div>
+        <div class="hint" id="historyHint">Se a imagem não vier do site, você pode colar um link ou fazer upload e ver a prévia ao vivo.</div>
+      </aside>
+    </div>
+
+    <div class="bottom-grid triple">
+      <section class="panel">
+        <h2>Últimos posts enviados</h2>
+        <div id="recentPostsList" class="mini-list">
+          {% for post in recent_posts %}
+          <div class="mini-item"><div><strong>{{ post.title or 'Sem título' }}</strong></div><div class="muted-small">{{ post.store or 'Loja' }} • {{ post.price_text or 'Sem preço' }}</div><div class="muted-small">por {{ post.sent_by }} em {{ post.sent_at }} • {{ post.source_status or 'direct' }}</div></div>
+          {% else %}<div class="muted-small">Nenhum post enviado ainda.</div>{% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Rascunhos</h2>
+        <div id="draftsList" class="mini-list">
+          {% for draft in drafts %}
+          <div class="mini-item"><div><strong>{{ draft.title or 'Sem título' }}</strong></div><div class="muted-small">{{ draft.store or 'Loja' }} • {{ draft.price or 'Sem preço' }}</div><div class="muted-small">por {{ draft.created_by }} • {{ draft.updated_at }}</div><div class="row row-wrap"><button class="ghost fit" onclick="loadDraft({{ draft.id }})">Carregar</button></div></div>
+          {% else %}<div class="muted-small">Nenhum rascunho salvo.</div>{% endfor %}
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Busca no histórico</h2>
+        <div class="row row-wrap"><input id="history_query" placeholder="Buscar por produto, loja, usuário ou link" /><button class="ghost fit" onclick="searchHistory()">Buscar</button></div>
+        <div id="historyResults" class="mini-list"><div class="muted-small">Digite algo e clique em buscar.</div></div>
+      </section>
+    </div>
+
+    <div class="bottom-grid">
+      {% if user_role in ['admin','subadmin'] %}
+      <section class="panel">
+        <h2>Equipe</h2>
+        <div class="form-grid team-grid">
+          <label>Usuário<input id="new_username" placeholder="ex: joao" /></label>
+          <label>Nome de exibição<input id="new_display_name" placeholder="João" /></label>
+          <label>Senha<input id="new_password" placeholder="mínimo 4 caracteres" /></label>
+          <label>Perfil
+            <select id="new_role">
+              <option value="member">Membro</option>
+              <option value="editor">Editor</option>
+              <option value="subadmin">Sub-admin</option>
+              {% if user_role == 'admin' %}<option value="admin">Administrador</option>{% endif %}
+            </select>
+          </label>
+        </div>
+        <div class="row row-wrap"><button class="primary fit" onclick="createUser()">Criar usuário</button></div>
+        <div id="teamStatus" class="status"></div>
+        <div id="teamUsersList" class="mini-list">
+          {% for user in team_users %}
+          <div class="mini-item">
+            <div class="user-actions-head"><div><strong>{{ user.display_name }}</strong> <span class="muted-small">@{{ user.username }}</span></div><div class="tag">{{ user.role }}</div></div>
+            <div class="form-grid compact">
+              <label>Nome<input id="display_{{ user.id }}" value="{{ user.display_name }}" /></label>
+              <label>Perfil
+                <select id="role_{{ user.id }}">
+                  <option value="member" {% if user.role=='member' %}selected{% endif %}>Membro</option>
+                  <option value="editor" {% if user.role=='editor' %}selected{% endif %}>Editor</option>
+                  <option value="subadmin" {% if user.role=='subadmin' %}selected{% endif %}>Sub-admin</option>
+                  {% if user_role == 'admin' %}<option value="admin" {% if user.role=='admin' %}selected{% endif %}>Administrador</option>{% endif %}
+                </select>
+              </label>
+              <label>Nova senha<input id="pass_{{ user.id }}" placeholder="deixe em branco para manter" /></label>
+              <label>Ativo
+                <select id="active_{{ user.id }}"><option value="1" {% if user.is_active %}selected{% endif %}>Sim</option><option value="0" {% if not user.is_active %}selected{% endif %}>Não</option></select>
+              </label>
+            </div>
+            <div class="row row-wrap"><button class="ghost fit" onclick="updateUser({{ user.id }})">Salvar edição</button><button class="danger fit" onclick="deleteUser({{ user.id }})">Excluir</button></div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% if user_role in ['admin','subadmin'] %}
+      <section class="panel">
+        <h2>Posts para revisão / agendados</h2>
+        <div id="pendingPostsList" class="mini-list">
+          {% for post in pending_posts %}
+          <div class="mini-item">
+            <div><strong>#{{ post.id }}</strong> • {{ post.status }}</div>
+            <div class="muted-small">por {{ post.created_by }} • {{ post.created_at }}</div>
+            {% if post.scheduled_for %}<div class="muted-small">agendado para {{ post.scheduled_for }}</div>{% endif %}
+            {% if post.commission_estimate and user_role == 'admin' %}<div class="muted-small">Comissão: {{ post.commission_estimate }}</div>{% endif %}
+            <pre class="mini-pre">{{ post.caption }}</pre>
+            <div class="row row-wrap">
+              {% if post.status == 'pending_review' %}
+              <button class="primary fit" onclick="approvePost({{ post.id }})">Aprovar</button>
+              <button class="danger fit" onclick="rejectPost({{ post.id }})">Recusar</button>
+              {% endif %}
+              {% if post.status == 'approved_scheduled' %}
+              <button class="ghost fit" onclick="prepareScheduledEdit({{ post.id }})">Editar agendado</button>
+              {% endif %}
+            </div>
+          </div>
+          {% else %}<div class="muted-small">Nenhum post aguardando revisão.</div>{% endfor %}
+        </div>
+      </section>
+      {% endif %}
+    </div>
+
+    <div class="bottom-grid">
+      {% if user_role in ['admin','subadmin'] %}
+      <section class="panel">
+        <h2>Histórico de aprovação</h2>
+        <div id="approvalHistoryList" class="mini-list">
+          {% for item in approval_history %}
+          <div class="mini-item"><div><strong>#{{ item.post_id }}</strong> • {{ item.action }}</div><div class="muted-small">{{ item.actor }} • {{ item.created_at }}</div>{% if item.note %}<div class="muted-small">{{ item.note }}</div>{% endif %}</div>
+          {% else %}<div class="muted-small">Sem histórico ainda.</div>{% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      <section class="panel">
+        <h2>Notificações internas</h2>
+        <div id="notificationsList" class="mini-list">
+          {% for n in notifications %}
+          <div class="mini-item"><div>{{ n.message }}</div><div class="muted-small">{{ n.created_at }}</div>{% if not n.is_read %}<div class="row row-wrap"><button class="ghost fit" onclick="markNotificationRead({{ n.id }})">Marcar como lida</button></div>{% endif %}</div>
+          {% else %}<div class="muted-small">Sem notificações.</div>{% endfor %}
+        </div>
+      </section>
+    </div>
+  </div>
+
+<script>
+let currentProduct = {};
+let currentDraftId = null;
+
+function setStatus(msg, ok=false, target='status'){ const el=document.getElementById(target); if(!el) return; el.textContent=msg||''; el.classList.toggle('error', !ok && !!msg); }
+function getVal(id){ const el=document.getElementById(id); return el ? el.value.trim() : ''; }
+
+function getProductFromForm(){
+  return {
+    url:getVal('url'), title:getVal('title'), store:getVal('store'), price:getVal('price'),
+    old_price:getVal('old_price'), coupon:getVal('coupon'), image:getVal('image'),
+    disclaimer:getVal('disclaimer'), fire_label:getVal('fire_label'), headline:getVal('headline'),
+    copy:document.getElementById('copy').value, commission_estimate:getVal('commission_estimate'),
+    internal_comment:getVal('internal_comment'), product_key:currentProduct.product_key||'',
+    best_price_text:currentProduct.best_price_text||'', fire_emoji:currentProduct.fire_emoji||'🔥',
+    suspicious_low_text:currentProduct.suspicious_low_text||''
+  };
+}
+
+function fillForm(product, preserve=false){
+  const curFire = getVal('fire_label'), curHead = getVal('headline');
+  currentProduct = { ...currentProduct, ...product };
+  ['url','title','store','price','old_price','coupon','image','disclaimer','copy','fire_label','headline'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    if(product[id] !== undefined && product[id] !== null){
+      if(preserve && (id==='fire_label' || id==='headline')) return;
+      el.value = product[id];
+    }
+  });
+  if(preserve && curFire) document.getElementById('fire_label').value = curFire;
+  if(preserve && curHead) document.getElementById('headline').value = curHead;
+  updateFireBadge(); updateHistoryHint(); previewCard();
+}
+
+function updateFireBadge(){ document.getElementById('fireBadge').textContent = `${currentProduct.fire_emoji || '🔥'} ${getVal('fire_label') || currentProduct.fire_label || 'Preço ok'}`; }
+function updateHistoryHint(){
+  let text = 'Se a imagem não vier do site, você pode colar um link ou fazer upload e ver a prévia ao vivo.';
+  if(currentProduct.best_price_text) text += ` Referência atual: ${currentProduct.best_price_text}.`;
+  if(currentProduct.suspicious_low_text) text += ` Um preço fora da curva (${currentProduct.suspicious_low_text}) foi ignorado.`;
+  document.getElementById('historyHint').textContent = text;
+}
+
+async function extractData(){
+  const url = getVal('url');
+  if(!url) return setStatus('Cole um link primeiro.');
+  setStatus('Puxando dados do link...');
+  const r = await fetch('/api/extract', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url})});
+  const data = await r.json();
+  if(!data.ok) return setStatus(data.error || 'Erro ao puxar dados.');
+  fillForm(data.product, false); setStatus('Dados puxados com sucesso.', true);
+}
+
+async function recalculateHeat(){
+  const product = getProductFromForm();
+  if(!product.title && !product.url) return;
+  const r = await fetch('/api/recalculate-heat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({product})});
+  const data = await r.json();
+  if(data.ok) fillForm(data.product, true);
+}
+
+function buildCopy(){
+  const p = getProductFromForm();
+  const fire = currentProduct.fire_emoji || '🔥';
+  const label = p.fire_label || currentProduct.fire_label || 'Preço ok';
+  const headline = p.headline || `${fire} ${label.toUpperCase()} NESSE ${(p.store || 'LOJA').toUpperCase()}`;
+  let lines = [headline, '', p.title || 'Oferta do dia'];
+  if(p.old_price) lines.push(`De ${p.old_price} por ${p.price || 'R$ 0,00'}`); else lines.push(`Por ${p.price || 'R$ 0,00'}`);
+  if(p.coupon) lines.push(`Cupom: ${p.coupon} 🎟️`);
+  lines.push('', `Loja Oficial ${p.store || 'Loja'}`);
+  if(p.url) lines.push(p.url);
+  if(currentProduct.best_price_text) lines.push('', `Referência de histórico: ${currentProduct.best_price_text}`);
+  if(p.disclaimer) lines.push('', p.disclaimer);
+  document.getElementById('copy').value = lines.join('\n'); previewCard(); setStatus('Texto montado.', true);
+}
+
+async function saveHistory(){
+  const product = getProductFromForm();
+  if(!product.title || !product.price) return setStatus('Preencha título e preço antes de salvar no histórico.');
+  setStatus('Salvando histórico...');
+  const r = await fetch('/api/save-history', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({product})});
+  const data = await r.json();
+  if(!data.ok) return setStatus(data.error || 'Erro ao salvar histórico.');
+  fillForm(data.product, true); setStatus('Histórico salvo com sucesso.', true);
+}
+
+function previewCard(){
+  const image = getVal('image');
+  document.getElementById('previewImage').src = image || 'https://placehold.co/900x900?text=Sem+imagem';
+  document.getElementById('previewCopy').textContent = document.getElementById('copy').value || 'Sua prévia vai aparecer aqui.';
+  applyImageEdits(); updateFireBadge();
+}
+
+function applyImageEdits(){
+  const img = document.getElementById('previewImage');
+  if(!img) return;
+  const scale = document.getElementById('img_scale') ? document.getElementById('img_scale').value : 100;
+  const radius = document.getElementById('img_radius') ? document.getElementById('img_radius').value : 20;
+  const badge = document.getElementById('img_badge') ? document.getElementById('img_badge').value.trim() : '';
+  img.style.transform = `scale(${scale/100})`;
+  img.style.borderRadius = `${radius}px`;
+  document.getElementById('previewBadge').textContent = badge;
+  document.getElementById('previewBadge').style.display = badge ? 'block' : 'none';
+}
+
+async function uploadImage(){
+  const fi = document.getElementById('image_upload');
+  if(!fi.files || !fi.files[0]) return;
+  const fd = new FormData(); fd.append('image', fi.files[0]);
+  setStatus('Enviando imagem...');
+  const r = await fetch('/api/upload-image', {method:'POST', body:fd});
+  const data = await r.json();
+  if(!data.ok) return setStatus(data.error || 'Erro no upload.');
+  document.getElementById('image').value = data.url; previewCard(); setStatus('Imagem enviada com sucesso.', true);
+}
+
+async function saveDraft(){
+  const payload = { draft_id: currentDraftId, caption: document.getElementById('copy').value, image:getVal('image'),
+    schedule_at:getVal('schedule_at'), commission_estimate:getVal('commission_estimate'), product:getProductFromForm() };
+  const r = await fetch('/api/save-draft', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+  const data = await r.json();
+  if(!data.ok) return setStatus(data.error || 'Erro ao salvar rascunho.');
+  setStatus(data.message, true); refreshDashboardData();
+}
+
+async function loadDraft(id){
+  const r = await fetch(`/api/drafts/${id}`); const data = await r.json();
+  if(!data.ok) return setStatus(data.error || 'Erro ao carregar rascunho.');
+  currentDraftId = data.draft.id; fillForm(data.draft.product, false);
+  document.getElementById('copy').value = data.draft.caption || '';
+  document.getElementById('image').value = data.draft.image || data.draft.product.image || '';
+  if(document.getElementById('schedule_at')) document.getElementById('schedule_at').value = data.draft.scheduled_for || '';
+  if(document.getElementById('commission_estimate')) document.getElementById('commission_estimate').value = data.draft.commission_estimate || '';
+  previewCard(); setStatus('Rascunho carregado.', true);
+}
+
+function copyText(){ navigator.clipboard.writeText(document.getElementById('copy').value || ''); setStatus('Texto copiado.', true); }
+
+async function sendTelegram(){
+  const caption = document.getElementById('copy').value.trim();
+  if(!caption) return setStatus('Gere ou escreva o texto antes de enviar.');
+  setStatus('Processando...');
+  const r = await fetch('/api/send-telegram', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ caption, image:getVal('image'), product:getProductFromForm(), schedule_at:getVal('schedule_at'),
+      commission_estimate:getVal('commission_estimate'), internal_comment:getVal('internal_comment') })
+  });
+  const data = await r.json();
+  if(!data.ok) return setStatus(data.error || 'Falha ao processar.');
+  setStatus(data.message || 'OK', true); refreshDashboardData();
+}
+
+async function createUser(){
+  const payload = { username:getVal('new_username'), display_name:getVal('new_display_name'),
+    password:getVal('new_password'), role:document.getElementById('new_role').value };
+  const r = await fetch('/api/team-users', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+  const data = await r.json();
+  if(!data.ok) return setStatus(data.error || 'Erro ao criar usuário.', false, 'teamStatus');
+  setStatus('Usuário criado.', true, 'teamStatus'); refreshDashboardData();
+}
+
+async function updateUser(id){
+  const payload = { display_name:getVal(`display_${id}`), role:document.getElementById(`role_${id}`).value,
+    password:getVal(`pass_${id}`), is_active:document.getElementById(`active_${id}`).value };
+  const r = await fetch(`/api/team-users/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+  const data = await r.json();
+  if(!data.ok) return setStatus(data.error || 'Erro ao editar usuário.', false, 'teamStatus');
+  setStatus('Usuário atualizado.', true, 'teamStatus'); refreshDashboardData();
+}
+
+async function deleteUser(id){
+  if(!confirm('Excluir esse usuário?')) return;
+  const r = await fetch(`/api/team-users/${id}`, {method:'DELETE'});
+  const data = await r.json();
+  if(!data.ok) return setStatus(data.error || 'Erro ao excluir usuário.', false, 'teamStatus');
+  setStatus('Usuário excluído.', true, 'teamStatus'); refreshDashboardData();
+}
+
+async function approvePost(id){
+  const note = prompt('Comentário interno da aprovação (opcional):') || '';
+  const r = await fetch(`/api/pending-posts/${id}/approve`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({note})});
+  const data = await r.json();
+  if(!data.ok) return setStatus(data.error || 'Erro ao aprovar.');
+  setStatus(data.message || 'Aprovado.', true); refreshDashboardData();
+}
+
+async function rejectPost(id){
+  const note = prompt('Motivo da recusa:') || '';
+  const r = await fetch(`/api/pending-posts/${id}/reject`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({note})});
+  const data = await r.json();
+  if(!data.ok) return setStatus(data.error || 'Erro ao recusar.');
+  setStatus(data.message || 'Recusado.', true); refreshDashboardData();
+}
+
+async function prepareScheduledEdit(id){
+  const note = prompt('Comentário interno da edição (opcional):') || '';
+  const scheduled_for = prompt('Novo horário (YYYY-MM-DD HH:MM:SS). Deixe vazio para manter:') || '';
+  const r = await fetch(`/api/scheduled/${id}`, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ note, scheduled_for, caption:document.getElementById('copy').value || undefined, image:getVal('image') || undefined,
+      product:Object.keys(currentProduct).length ? getProductFromForm() : undefined, commission_estimate:getVal('commission_estimate') })
+  });
+  const data = await r.json();
+  if(!data.ok) return setStatus(data.error || 'Erro ao editar agendado.');
+  setStatus(data.message, true); refreshDashboardData();
+}
+
+async function searchHistory(){
+  const r = await fetch('/api/history-search?q=' + encodeURIComponent(getVal('history_query')));
+  const data = await r.json(); const wrap = document.getElementById('historyResults');
+  if(!data.ok) return wrap.innerHTML = '<div class="muted-small">Erro ao buscar.</div>';
+  wrap.innerHTML = data.results.length ? data.results.map(item => `
+    <div class="mini-item">
+      <div><strong>${item.title || 'Sem título'}</strong></div>
+      <div class="muted-small">${item.store || 'Loja'} • ${item.price_text || 'Sem preço'}</div>
+      <div class="muted-small">por ${item.created_by || '-'} • ${item.created_at || '-'}</div>
+      <div class="muted-small">${item.url || ''}</div>
+    </div>`).join('') : '<div class="muted-small">Nada encontrado.</div>';
+}
+
+async function markNotificationRead(id){ await fetch(`/api/notifications/${id}/read`, {method:'POST'}); refreshDashboardData(); }
+
+function renderList(id, html){ const wrap = document.getElementById(id); if(wrap) wrap.innerHTML = html; }
+
+function renderUsers(users){
+  const html = users.length ? users.map(user => `
+    <div class="mini-item">
+      <div class="user-actions-head"><div><strong>${user.display_name}</strong> <span class="muted-small">@${user.username}</span></div><div class="tag">${user.role}</div></div>
+      <div class="form-grid compact">
+        <label>Nome<input id="display_${user.id}" value="${user.display_name}" /></label>
+        <label>Perfil
+          <select id="role_${user.id}">
+            ${['member','editor','subadmin','admin'].map(role => `<option value="${role}" ${user.role===role?'selected':''}>${role}</option>`).join('')}
+          </select>
+        </label>
+        <label>Nova senha<input id="pass_${user.id}" placeholder="deixe em branco para manter" /></label>
+        <label>Ativo<select id="active_${user.id}"><option value="1" ${user.is_active ? 'selected':''}>Sim</option><option value="0" ${!user.is_active ? 'selected':''}>Não</option></select></label>
+      </div>
+      <div class="row row-wrap"><button class="ghost fit" onclick="updateUser(${user.id})">Salvar edição</button><button class="danger fit" onclick="deleteUser(${user.id})">Excluir</button></div>
+    </div>`).join('') : '<div class="muted-small">Sem usuários.</div>';
+  renderList('teamUsersList', html);
+}
+
+function renderPending(posts){
+  const html = posts.length ? posts.map(post => `
+    <div class="mini-item">
+      <div><strong>#${post.id}</strong> • ${post.status}</div>
+      <div class="muted-small">por ${post.created_by} • ${post.created_at}</div>
+      ${post.scheduled_for ? `<div class="muted-small">agendado para ${post.scheduled_for}</div>` : ''}
+      ${post.commission_estimate ? `<div class="muted-small">Comissão: ${post.commission_estimate}</div>` : ''}
+      <pre class="mini-pre">${(post.caption || '').replace(/</g,'&lt;')}</pre>
+      <div class="row row-wrap">
+        ${post.status === 'pending_review' ? `<button class="primary fit" onclick="approvePost(${post.id})">Aprovar</button><button class="danger fit" onclick="rejectPost(${post.id})">Recusar</button>` : ''}
+        ${post.status === 'approved_scheduled' ? `<button class="ghost fit" onclick="prepareScheduledEdit(${post.id})">Editar agendado</button>` : ''}
+      </div>
+    </div>`).join('') : '<div class="muted-small">Nenhum post aguardando revisão.</div>';
+  renderList('pendingPostsList', html);
+}
+
+function renderRecent(posts){
+  const html = posts.length ? posts.map(post => `<div class="mini-item"><div><strong>${post.title || 'Sem título'}</strong></div><div class="muted-small">${post.store || 'Loja'} • ${post.price_text || 'Sem preço'}</div><div class="muted-small">por ${post.sent_by} em ${post.sent_at} • ${post.source_status || 'direct'}</div></div>`).join('') : '<div class="muted-small">Nenhum post enviado ainda.</div>';
+  renderList('recentPostsList', html);
+}
+
+function renderDrafts(drafts){
+  const html = drafts.length ? drafts.map(d => `<div class="mini-item"><div><strong>${d.title || 'Sem título'}</strong></div><div class="muted-small">${d.store || 'Loja'} • ${d.price || 'Sem preço'}</div><div class="muted-small">por ${d.created_by} • ${d.updated_at}</div><div class="row row-wrap"><button class="ghost fit" onclick="loadDraft(${d.id})">Carregar</button></div></div>`).join('') : '<div class="muted-small">Nenhum rascunho salvo.</div>';
+  renderList('draftsList', html);
+}
+
+function renderApproval(items){
+  const html = items.length ? items.map(item => `<div class="mini-item"><div><strong>#${item.post_id}</strong> • ${item.action}</div><div class="muted-small">${item.actor} • ${item.created_at}</div>${item.note ? `<div class="muted-small">${item.note}</div>` : ''}</div>`).join('') : '<div class="muted-small">Sem histórico ainda.</div>';
+  renderList('approvalHistoryList', html);
+}
+
+function renderNotifications(items){
+  const html = items.length ? items.map(n => `<div class="mini-item"><div>${n.message}</div><div class="muted-small">${n.created_at}</div>${!n.is_read ? `<div class="row row-wrap"><button class="ghost fit" onclick="markNotificationRead(${n.id})">Marcar como lida</button></div>` : ''}</div>`).join('') : '<div class="muted-small">Sem notificações.</div>';
+  renderList('notificationsList', html);
+}
+
+function renderStats(stats){
+  const map = {s_users:stats.total_users, s_sent:stats.total_sent, s_pending:stats.total_pending, s_drafts:stats.total_drafts, s_sched:stats.total_scheduled, s_rej:stats.total_rejected};
+  Object.entries(map).forEach(([id,v]) => { const el=document.getElementById(id); if(el) el.textContent=v; });
+}
+
+async function refreshDashboardData(){
+  const r = await fetch('/api/dashboard-data'); const data = await r.json(); if(!data.ok) return;
+  renderRecent(data.recent_posts || []); renderUsers(data.team_users || []); renderPending(data.pending_posts || []);
+  renderDrafts(data.drafts || []); renderApproval(data.approval_history || []); renderNotifications(data.notifications || []); renderStats(data.dashboard_numbers || {});
+}
+
+['title','store','price','old_price','coupon','headline','fire_label','disclaimer','image'].forEach(id => {
+  const el = document.getElementById(id); if(el) el.addEventListener('change', recalculateHeat);
+});
+previewCard(); setInterval(refreshDashboardData, 30000);
+</script>
+</body>
+</html>
